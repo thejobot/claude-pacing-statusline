@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Claude Code status line.
 
-Line 1: Opus 4.8 (1M context) [high]  [bar] 5%  52k / 1000k tokens
+Line 1: Opus 4.8  ▁▃▅ high  [bar] 5%  52k / 1000k tokens   (effort ramp gauge)
 Line 2: 5h  fill+time-cursor bar  33%  ↻ 47m   →39%
 Line 3: 7d  fill+time-cursor bar  58%  ↻ Sat 5pm  →60%
 
@@ -28,6 +28,33 @@ def grad(p):
         t = (p - 50) / 50
         r, g, b = 230, int(200 - 140 * t), int(40 + 20 * t)
     return f"\033[38;2;{r};{g};{b}m"
+
+
+# reasoning-effort tiers, low -> high, each with a ramp height and accent color
+EFFORT_TIERS = ["low", "medium", "high", "xhigh"]
+EFFORT_COLOR = {
+    "low":    "\033[38;2;130;200;130m",   # green
+    "medium": "\033[38;2;90;180;235m",    # blue
+    "high":   "\033[38;2;240;205;90m",    # amber
+    "xhigh":  "\033[38;2;240;120;90m",    # orange
+}
+EFFORT_RAMP = "▁▃▅▇"
+EFFORT_LABEL = {"low": "low", "medium": "med", "high": "high", "xhigh": "xhigh"}
+
+
+def effort_gauge(level):
+    """A 4-step ramp lit up to the current reasoning-effort tier."""
+    if not level:
+        return ""
+    if level not in EFFORT_TIERS:
+        return f"{DIM}[{level}]{RESET}"
+    n = EFFORT_TIERS.index(level) + 1
+    col = EFFORT_COLOR[level]
+    bars = "".join(
+        f"{col}{ch}{RESET}" if i < n else f"{DIM}{ch}{RESET}"
+        for i, ch in enumerate(EFFORT_RAMP)
+    )
+    return f"{bars} {col}{EFFORT_LABEL[level]}{RESET}"
 
 
 def k(n):
@@ -123,7 +150,8 @@ def main():
 
     name = model_name(d.get("model") or {})
     effort = (d.get("effort") or {}).get("level")
-    effort_str = f" {DIM}[{effort}]{RESET}" if effort else ""
+    gauge = effort_gauge(effort)
+    effort_str = f"  {gauge}" if gauge else ""
 
     # --- line 1: context window ---
     cw = d.get("context_window") or {}
