@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Claude Code status line.
 
-Line 1: Opus 4.8  ▁▃▅ high  [bar] 5%  52k / 1000k tokens   (effort ramp gauge)
+Line 1: Opus 4.8  ▁▂▄▆ xhigh  [bar] 5%  52k / 1000k tokens   (effort ramp gauge)
 Line 2: 5h  fill+time-cursor bar  33%  ↻ 47m   →39%
 Line 3: 7d  fill+time-cursor bar  58%  ↻ Sat 5pm  →60%
 
@@ -30,16 +30,19 @@ def grad(p):
     return f"\033[38;2;{r};{g};{b}m"
 
 
-# reasoning-effort tiers, low -> high, each with a ramp height and accent color
-EFFORT_TIERS = ["low", "medium", "high", "xhigh"]
+# reasoning-effort tiers, low -> max, each with a ramp height and accent color.
+# (ultracode/auto resolve to one of these; the status line reports the active tier.)
+EFFORT_TIERS = ["low", "medium", "high", "xhigh", "max"]
 EFFORT_COLOR = {
     "low":    "\033[38;2;130;200;130m",   # green
     "medium": "\033[38;2;90;180;235m",    # blue
     "high":   "\033[38;2;240;205;90m",    # amber
-    "xhigh":  "\033[38;2;240;120;90m",    # orange
+    "xhigh":  "\033[38;2;245;140;70m",    # orange
+    "max":    "\033[38;2;240;75;75m",     # red (ceiling)
 }
-EFFORT_RAMP = "▁▃▅▇"
-EFFORT_LABEL = {"low": "low", "medium": "med", "high": "high", "xhigh": "xhigh"}
+EFFORT_RAMP = "▁▂▄▆█"
+EFFORT_LABEL = {"low": "low", "medium": "med", "high": "high",
+                "xhigh": "xhigh", "max": "max"}
 
 
 def effort_gauge(level):

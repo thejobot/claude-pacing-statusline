@@ -5,16 +5,16 @@ A custom [Claude Code](https://docs.claude.com/en/docs/claude-code) status line 
 It turns the data behind the `/usage` command (and the desktop app's "Plan usage limits" panel) into three always-on lines at the bottom of your terminal.
 
 ```
-Opus 4.8  ▁▃▅ high  [█░░░░░░░░░░░░░░░░░░░░░] 5%  52k / 1000k tokens
+Opus 4.8  ▁▂▄▆ xhigh  [█░░░░░░░░░░░░░░░░░░░░░] 5%  52k / 1000k tokens
   5h ██████░░░░░░░░░┃░░ 32%  ↻ 46m         →38%
   7d ██████████░░░░┃░░░ 57%  ↻ Sat 4:59pm  →61%
 ```
 
-(Colors not shown above: the usage bars run a green to yellow to red gradient as they fill; the `┃` cursor is bright white; the `▁▃▅▇` effort gauge shifts green → blue → amber → orange by tier.)
+(Colors not shown above: the usage bars run a green to yellow to red gradient as they fill; the `┃` cursor is bright white; the `▁▂▄▆█` effort gauge shifts green → blue → amber → orange → red by tier.)
 
 ## What each line shows
 
-- **Line 1:** model, a **`▁▃▅▇` effort gauge** (a ramp that lights up to the current reasoning-effort tier: low / med / high / xhigh, color-shifting green → blue → amber → orange), and the current conversation's context-window fill (`tokens used / context size`).
+- **Line 1:** model, a **`▁▂▄▆█` effort gauge** (a 5-step ramp that lights up to the current reasoning-effort tier: low / medium / high / xhigh / max, color-shifting green → blue → amber → orange → red), and the current conversation's context-window fill (`tokens used / context size`). Unknown values like `auto` fall back to a dim text label.
 - **Line 2:** your **5-hour session** limit.
 - **Line 3:** your **7-day weekly** (all-models) limit.
 
