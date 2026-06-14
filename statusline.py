@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
 """Claude Code status line.
 
-Line 1: Opus 4.8  ▁▂▄▆ xhigh  [bar] 5%  52k / 1000k tokens   (effort ramp gauge)
-Line 2: 5h  fill+time-cursor bar  33%  ↻ 47m   →39%
-Line 3: 7d  fill+time-cursor bar  58%  ↻ Sat 5pm  →60%
+Line 1: Opus 4.8  ▁▂▄▆ xhigh  context 5%  52k / 1000k tokens   (effort gauge)
+Line 2: 5h  used 33%  resets 47m  spend up to 22% per hour  [bar] using 60%
+Line 3: 7d  used 58%  resets 6d12h / Sat 5pm  spend up to 14% per day  [bar] using 56%  on track
 
-The bar fill = % of the plan limit used. The bright cursor (┃) marks how far
-through the reset window the *clock* is. Fill left of the cursor = under-pacing
-(headroom); fill past the cursor = burning faster than the clock. →N% projects
-usage at window close at the current burn rate.
+Every percentage is labeled so you always know what it measures:
+  context     - how full THIS chat's context window is
+  used        - % of this window's plan limit you've already spent
+  resets      - when the window refills (countdown / wall-clock for 7d)
+  spend up to - suggested limit: the most you can use per hour (5h) / day (7d)
+                and still land at 100% by reset (the bar's full point)
+  [bar] using - speedometer: how much of that limit your CURRENT pace is using.
+                Bar + the using-% are the same value. Near empty = lots of room;
+                full = right at the limit; past 100% pins red = overspending.
+
+The 7d row ends with an adaptive verb -- the plain-English summary:
+  go heavy / push / on track / ease off / ration
+It digests the burn-rate projection so you don't have to. Green = headroom going
+unused, spend more; red = overspending, back off. Re-reads every render.
 """
 import sys, json, time, datetime
 
@@ -80,7 +90,10 @@ def rel_secs(s):
 
 def day_label(ts):
     t = datetime.datetime.fromtimestamp(ts)
-    return t.strftime("%a ") + t.strftime("%I:%M%p").lstrip("0").lower()
+    clock = t.strftime("%I:%M%p")
+    if t.minute == 0:                       # 5:00pm -> 5pm
+        clock = t.strftime("%I%p")
+    return t.strftime("%a ") + clock.lstrip("0").lower()
 
 
 def model_name(model):
@@ -106,8 +119,37 @@ def pick(obj, *keys):
     return None
 
 
-def usage_line(label, window, duration, reset_fmt):
-    """Build one usage row: label + paced bar + % + reset + projection."""
+CYAN = "\033[38;2;90;200;210m"
+
+# adaptive daily strategy, keyed on the PROJECTION (where current pace lands you
+# at reset). Low projection = lots of headroom left unused -> spend more; high =
+# overspending -> back off. Re-reads every render, so it tracks the whole week.
+STRAT = [  # (projection ceiling %, verb, color)
+    (60,    "go heavy", "\033[38;2;60;200;90m"),    # bright green
+    (80,    "push",     "\033[38;2;150;205;70m"),   # green
+    (108,   "on track", "\033[38;2;230;200;60m"),   # yellow
+    (145,   "ease off", "\033[38;2;240;150;70m"),   # orange
+    (10**9, "ration",   "\033[38;2;240;75;75m"),    # red
+]
+
+
+def daily_strategy(proj):
+    for lim, verb, col in STRAT:
+        if proj <= lim:
+            return verb, col
+
+
+def pace_bar(ratio, width=10):
+    """Speedometer: how close current pace is to the suggested limit.
+    full = right at the limit (on track to use the whole plan); over = red."""
+    fill = max(0, min(width, round(min(ratio, 1.0) * width)))
+    col = grad(min(ratio, 1.3) * 80)       # green under, red at/over the limit
+    return f"[{col}{'█' * fill}{RESET}{DIM}{'░' * (width - fill)}{RESET}]"
+
+
+def usage_line(label, window, duration, reset_fmt, alloc_unit, alloc_secs,
+               strategy=False):
+    """One row: window + used% + reset + pace-vs-limit speedometer (+ strategy)."""
     pct = pick(window, "used_percentage", "usedPercentage", "percent_used", "used")
     resets = pick(window, "resets_at", "resetsAt", "reset_at", "resets")
     if not isinstance(pct, (int, float)) or not isinstance(resets, (int, float)):
@@ -117,31 +159,28 @@ def usage_line(label, window, duration, reset_fmt):
     remaining = resets - now
     elapsed_frac = max(0.0, min(1.0, 1 - remaining / duration))
 
-    width = 18
-    fill = max(0, min(width, round(pct / 100 * width)))
-    cursor = max(0, min(width - 1, round(elapsed_frac * width)))
-    fcol = grad(pct)
-
-    cells = []
-    for i in range(width):
-        if i == cursor:
-            cells.append(f"{WHITE}┃{RESET}")
-        elif i < fill:
-            cells.append(f"{fcol}█{RESET}")
-        else:
-            cells.append(f"{DIM}░{RESET}")
-    bar = "".join(cells)
-
-    # projection: extrapolate current burn to the window close
-    proj_txt = ""
-    if elapsed_frac > 0.04:
-        proj = pct / elapsed_frac
-        pcol = grad(proj)
-        proj_txt = f"  {DIM}→{RESET}{pcol}{min(round(proj),999)}%{RESET}"
-
     reset_txt = reset_fmt(resets) if remaining > 0 else "now"
-    return (f"  {DIM}{label}{RESET} {bar} {fcol}{round(pct)}%{RESET}"
-            f"  {DIM}↻{RESET} {reset_txt}{proj_txt}")
+    row = (f"  {DIM}{label}{RESET} {DIM}used{RESET} {grad(pct)}{round(pct)}%{RESET}"
+           f"  {DIM}resets{RESET} {reset_txt}")
+
+    # how much of your suggested limit (budget left / time left) you're using.
+    units_total = duration / alloc_secs
+    units_elapsed = elapsed_frac * units_total
+    units_left = remaining / alloc_secs
+    if units_elapsed > 0.04 and units_left > 0.05:
+        pace = pct / units_elapsed
+        limit = max(0.0, 100 - pct) / units_left
+        ratio = pace / limit if limit > 0 else 2.0
+        pcol = grad(min(ratio, 1.3) * 80)
+        row += (f"  {DIM}spend up to{RESET} {CYAN}{min(round(limit),999)}% per "
+                f"{alloc_unit}{RESET}  {pace_bar(ratio)} "
+                f"{DIM}using{RESET} {pcol}{min(round(ratio*100),999)}%{RESET}")
+
+    if strategy and elapsed_frac > 0.04:     # adaptive verb from the projection
+        verb, vcol = daily_strategy(pct / elapsed_frac)
+        row += f"  {vcol}{BOLD}{verb}{RESET}"
+
+    return row
 
 
 def main():
@@ -174,7 +213,7 @@ def main():
     bar = f"{ccol}{'█'*filled}{RESET}{DIM}{'░'*(width-filled)}{RESET}"
     tokens = f"{k(used)} / {k(size)} tokens" if size else ""
     line1 = (f"{BOLD}{name}{RESET}{effort_str}  "
-             f"[{bar}] {ccol}{round(pct)}%{RESET}  {DIM}{tokens}{RESET}")
+             f"[{bar}] {DIM}context{RESET} {ccol}{round(pct)}%{RESET}  {DIM}{tokens}{RESET}")
 
     lines = [line1]
 
@@ -183,11 +222,15 @@ def main():
     sess = pick(rl, "five_hour", "fiveHour", "session")
     week = pick(rl, "seven_day", "sevenDay", "weekly", "week")
     if isinstance(sess, dict):
-        ln = usage_line("5h", sess, FIVE_HOUR, lambda ts: rel_secs(ts - time.time()))
+        ln = usage_line("5h", sess, FIVE_HOUR,
+                        lambda ts: rel_secs(ts - time.time()), "hour", HOUR)
         if ln:
             lines.append(ln)
     if isinstance(week, dict):
-        ln = usage_line("7d", week, SEVEN_DAY, day_label)
+        ln = usage_line(
+            "7d", week, SEVEN_DAY,
+            lambda ts: f"{rel_secs(ts - time.time())} / {day_label(ts)}",
+            "day", 24 * HOUR, strategy=True)
         if ln:
             lines.append(ln)
 
